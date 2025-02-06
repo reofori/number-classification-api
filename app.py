@@ -1,93 +1,100 @@
-from flask import Flask, jsonify, request
-from collections import OrderedDict
+from flask import Flask, request, jsonify
+import requests
+from flask_cors import CORS
 
+# Initialize Flask app
 app = Flask(__name__)
 
-# Helper functions for number classification
+# Enable CORS (restricting to API routes for security)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+# Helper functions
 def is_prime(n):
-    """Check if a number is prime."""
-    if n <= 1:
+    """Check if a number is prime. Only defined for positive numbers."""
+    if n < 2:
         return False
-    for i in range(2, int(n ** 0.5) + 1):
+    for i in range(2, int(n**0.5) + 1):
         if n % i == 0:
             return False
     return True
 
 def is_perfect(n):
-    """Check if a number is perfect."""
-    divisors_sum = sum(i for i in range(1, abs(n)) if n % i == 0)
-    return divisors_sum == n
+    """Check if a number is perfect. Only defined for positive numbers."""
+    if n < 2:
+        return False
+    divisors = [i for i in range(1, n) if n % i == 0]
+    return sum(divisors) == n
 
 def is_armstrong(n):
-    """Check if a number is an Armstrong number."""
-    digits = [int(digit) for digit in str(abs(int(n)))]  # Ensure it's positive
-    return sum(d ** len(digits) for d in digits) == abs(int(n))
+    """Check if a number is an Armstrong number (works for negatives)."""
+    digits = [int(d) for d in str(abs(n))]  # Use absolute value
+    length = len(digits)
+    return sum(d**length for d in digits) == abs(n)
 
-def calculate_digit_sum(n):
-    """Calculate the sum of digits of a number."""
-    return sum(int(digit) for digit in str(abs(int(n))))
+def digit_sum(n):
+    """Calculate the sum of the digits of a number (ignoring sign)."""
+    return sum(int(d) for d in str(abs(n)))  # Use absolute value
 
-
-def generate_fun_fact(n):
-    """Generate a fun fact for Armstrong numbers."""
-    if is_armstrong(n):
-        return f"{n} is an Armstrong number because " + " + ".join(f"{d}^3" for d in str(abs(int(n)))) + f" = {n}"
-    return "No fun fact available"
-
-def classify_number_properties(n):
-    """Classify properties of a given number."""
-    properties = []
-    if is_armstrong(n):
-        properties.append("armstrong")
-    if is_prime(n):
-        properties.append("prime")
-    if is_perfect(n):
-        properties.append("perfect")
-    if n % 2 != 0:
-        properties.append("odd")
-    else:
-        properties.append("even")
-    return properties
-
-def validate_input(number_str):
-    """Validate the input number to ensure it's a valid number."""
+def get_fun_fact(n):
+    """Fetch a fun fact about the number from the Numbers API with a timeout."""
+    url = f"http://numbersapi.com/{abs(n)}/math"  # Use absolute value to get valid API results
     try:
-        # Accept both integer and float, but convert everything to int for classification
-        return float(number_str), None
-    except (ValueError, TypeError):
-        return None, f"Invalid input: {number_str} is not a valid number."
+        response = requests.get(url, timeout=2)  # Timeout after 2 seconds
+        if response.status_code == 200:
+            return response.text
+    except requests.exceptions.RequestException:
+        return "Fun fact unavailable at the moment."
+    return "No fun fact available."
 
+# API endpoint
 @app.route('/api/classify-number', methods=['GET'])
 def classify_number():
-    # Get the number from the query parameter
-    number_str = request.args.get('number')
+    number = request.args.get('number')
 
-    # Validate input
-    number, error = validate_input(number_str)
-    if error:
-        # Ensure the error response matches the required format (number first, then error)
-        return jsonify(OrderedDict([
-            ("number", number_str),  # Place number first
-            ("error", True)           # Place error second
-        ])), 400
+    # If the number parameter is missing
+    if number is None:
+        return jsonify({
+            "error": True
+        }), 400
 
-    # Get properties of the valid number
-    properties = classify_number_properties(number)
-    digit_sum = calculate_digit_sum(number)
-    fun_fact = generate_fun_fact(number)
+    # Input validation: Ensure it's an integer
+    if not number.lstrip('-').isdigit():
+        return jsonify({
+            "number": number,
+            "error": True
+        }), 400
 
-    # Create the response data
-    data = OrderedDict([
-        ("number", number),
-        ("is_prime", is_prime(number)),
-        ("is_perfect", is_perfect(number)),
-        ("properties", properties),
-        ("digit_sum", digit_sum),
-        ("fun_fact", fun_fact)
-    ])
+    number = int(number)
 
-    return jsonify(data)
+    # Determine properties
+    properties = []
+    is_armstrong_number = is_armstrong(number)
+    if is_armstrong_number:
+        properties.append("armstrong")
+    if number % 2 == 0:
+        properties.append("even")
+    else:
+        properties.append("odd")
 
+    # Prepare response
+    response = {
+        "number": number,
+        "is_prime": is_prime(number) if number >= 0 else False,  # Prime is only for non-negative numbers
+        "is_perfect": is_perfect(number) if number >= 0 else False,  # Perfect is only for non-negative numbers
+        "properties": properties,
+        "digit_sum": digit_sum(number),
+        "fun_fact": get_fun_fact(number)
+    }
+
+    # Override fun_fact if the number is an Armstrong number
+    if is_armstrong_number:
+        digits = [int(d) for d in str(abs(number))]  # Use absolute value
+        length = len(digits)
+        armstrong_explanation = f"{number} is an Armstrong number because {' + '.join(f'{d}^{length}' for d in digits)} = {abs(number)}"
+        response["fun_fact"] = armstrong_explanation
+
+    return jsonify(response), 200
+
+# Run the app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    app.run(debug=True, host='0.0.0.0', port=8000)
