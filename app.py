@@ -60,7 +60,7 @@ def validate_input(number_str):
 def classify_number():
     # Get the number from the query parameter
     number_str = request.args.get('number')
-    
+
     # Validate input
     number, error = validate_input(number_str)
     if error:
@@ -88,4 +88,5 @@ def classify_number():
     return jsonify(data)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=True)
+
